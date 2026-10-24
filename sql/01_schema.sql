@@ -1,6 +1,8 @@
 -- Execute inside the dedicated "COT" database.
 BEGIN;
-CREATE SCHEMA IF NOT EXISTS cot;
+-- All schema objects must be owned by cot_loader, NOT by the admin account.
+SET LOCAL ROLE cot_loader;
+CREATE SCHEMA IF NOT EXISTS cot AUTHORIZATION cot_loader;
 
 CREATE TABLE IF NOT EXISTS cot.datasets (
     dataset_id text PRIMARY KEY CHECK (dataset_id ~ '^[a-z0-9]{4}-[a-z0-9]{4}$'),
@@ -45,9 +47,13 @@ CREATE TABLE IF NOT EXISTS cot.ingest_windows (
     fetched_rows bigint NOT NULL DEFAULT 0,
     status text NOT NULL DEFAULT 'running' CHECK (status IN ('running','completed','failed')),
     error_message text,
+    archive_manifest text,
     PRIMARY KEY (run_id,dataset_id,from_date,to_date),
     CHECK(to_date > from_date)
 );
+
+-- Compatible with schema installations created before raw-file preservation.
+ALTER TABLE cot.ingest_windows ADD COLUMN IF NOT EXISTS archive_manifest text;
 
 CREATE TABLE IF NOT EXISTS cot.reports (
     dataset_id text NOT NULL REFERENCES cot.datasets(dataset_id),
@@ -123,5 +129,10 @@ FROM cot.reports r
 JOIN cot.datasets d USING (dataset_id)
 CROSS JOIN LATERAL jsonb_each_text(r.payload) AS kv(key,value)
 WHERE kv.value ~ '^[+-]?[0-9]+([.][0-9]+)?$';
+
+-- Applications have read-only access; ingestion exclusively uses cot_loader.
+GRANT USAGE ON SCHEMA cot TO cot_app;
+GRANT SELECT ON ALL TABLES IN SCHEMA cot TO cot_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA cot GRANT SELECT ON TABLES TO cot_app;
 
 COMMIT;
