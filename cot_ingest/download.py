@@ -1,144 +1,152 @@
-"""Download original CFTC COT API reports to OneDrive without using PostgreSQL.
+"""Download full CFTC COT datasets into ONE directory per CFTC report date.
+
+Default range: 2019 to present. No PostgreSQL credentials are required.
+All seven datasets share the same YYYY-MM-DD folder for any report date.
 
 Usage:
-    python -m cot_ingest.download history --start-year 2025 --end-year 2025
     python -m cot_ingest.download history
-    python -m cot_ingest.download weekly --lookback-days 56
-    python -m cot_ingest.download history --start-year 2025 --end-year 2025 --refresh
-
-Data is stored under D:\\OD\\OneDrive\\Fin\\data\\COT\\raw\\cftc_api,
-in immutable snapshots with a SHA-256-validated manifest. No DB connection is opened.
+    python -m cot_ingest.download history --start-year 2019 --end-year 2025
+    python -m cot_ingest.download weekly
+    python -m cot_ingest.download migrate
+    python -m cot_ingest.download verify
 """
 from __future__ import annotations
 
 import argparse
 from datetime import date, datetime, timedelta, timezone
-import json
 import logging
 import sys
+from typing import Any
 
-from cot_ingest.archive import (
-    SourceArchive, archive_root, ensure_archive, validate_archive,
-)
 from cot_ingest.sources import (
-    DATASETS, ORDER, api_session, check_dataset_selection, source_count, where_clause,
+    BASE, DATASETS, ORDER, api_session, check_dataset_selection, source_count,
+    where_clause,
+)
+from cot_ingest.weekly_files import (
+    migrate_old_archives, root_path, save_rows, verify_weekly_files,
 )
 
 LOG = logging.getLogger("cot.download")
 
 
-def download(
-    mode: str,
-    datasets: list[str],
-    start_year: int | None = None,
-    end_year: int | None = None,
-    lookback_days: int = 56,
-    page_size: int = 3000,
-    refresh: bool = False,
-) -> tuple[int, int]:
-    """Return (number of complete dataset-windows, total downloaded/reused rows)."""
-    if page_size < 1 or page_size > 10000:
-        raise ValueError("--page-size must be between 1 and 10000")
-    current = datetime.now(timezone.utc).date()
-    if mode == "history":
-        if start_year is not None and (start_year < 1900 or start_year > current.year):
-            raise ValueError("Invalid start year")
-        if end_year is not None and (end_year < 1900 or end_year > current.year):
-            raise ValueError("Invalid end year")
-        if start_year and end_year and start_year > end_year:
-            raise ValueError("--start-year cannot exceed --end-year")
-    elif mode == "weekly" and lookback_days < 7:
-        raise ValueError("--lookback-days must be >= 7")
+def download_window(session, dataset_id: str, start: date, stop: date,
+                    page_size: int) -> tuple[int, int, int]:
+    """Fetch a complete dataset/date-window and only then write weekly files."""
+    expected = source_count(session, dataset_id, start, stop)
+    fetched: list[dict[str, Any]] = []
+    offset = 0
+    while offset < expected:
+        params = {
+            "$where": where_clause(start, stop),
+            "$order": ORDER,
+            "$limit": min(page_size, expected - offset),
+            "$offset": offset,
+        }
+        response = session.get(f"{BASE}/{dataset_id}.json", params=params, timeout=(15, 120))
+        response.raise_for_status()
+        page = response.json()
+        if not isinstance(page, list) or not page or not all(isinstance(x, dict) for x in page):
+            raise RuntimeError(f"Missing CFTC response for {dataset_id} {start} offset={offset}")
+        if len(page) > params["$limit"]:
+            raise RuntimeError(f"CFTC sent too many rows for {dataset_id} offset={offset}")
+        offset += len(page)
+        fetched.extend(page)
+        LOG.info("%s %s: %d / %d rows", DATASETS[dataset_id][0], start.year, offset, expected)
+    if len(fetched) != expected:
+        raise RuntimeError(f"CFTC row-count mismatch {dataset_id} expected={expected}, got={len(fetched)}")
+    # A changed count can signal that API pagination saw a moving dataset.
+    final_count = source_count(session, dataset_id, start, stop)
+    if final_count != expected:
+        raise RuntimeError(f"CFTC dataset changed during download: {dataset_id} "
+                           f"{start} initial={expected} final={final_count}. Retry.")
+    return save_rows(dataset_id, fetched, start, stop)
 
-    finished, total_rows = 0, 0
-    LOG.info("Original CFTC files destination: %s", archive_root())
+
+def run_download(mode: str, datasets: list[str], *,
+                 start_year: int = 2019, end_year: int | None = None,
+                 lookback_days: int = 56, page_size: int = 3000) -> tuple[int, int, int]:
+    now = datetime.now(timezone.utc).date()
+    if not 2019 <= start_year <= now.year:
+        raise ValueError(f"Start year must be between 2019 and {now.year}")
+    if end_year is not None and not start_year <= end_year <= now.year:
+        raise ValueError(f"End year must be between {start_year} and {now.year}")
+    if not 1 <= page_size <= 10000:
+        raise ValueError("page-size must be between 1 and 10000")
+    if lookback_days < 7:
+        raise ValueError("lookback-days must be at least 7")
+
+    LOG.info("COT output: %s", root_path())
+    windows = (
+        [(date(year, 1, 1), date(year + 1, 1, 1))
+         for year in range(start_year, (end_year or now.year) + 1)]
+        if mode == "history" else
+        [(now - timedelta(days=lookback_days), now + timedelta(days=1))]
+    )
+    dates, files, rows = 0, 0, 0
     with api_session() as session:
-        for dataset_id in datasets:
-            if mode == "history":
-                first_year = max(DATASETS[dataset_id][1], start_year or DATASETS[dataset_id][1])
-                final_year = min(end_year or current.year, current.year)
-                windows = [
-                    (date(year, 1, 1), date(year + 1, 1, 1))
-                    for year in range(first_year, final_year + 1)
-                ]
-            elif mode == "weekly":
-                windows = [(current - timedelta(days=lookback_days),
-                            current + timedelta(days=1))]
-            else:
-                raise ValueError(f"Unsupported download mode: {mode}")
-            for start, stop in windows:
-                archive = ensure_archive(
-                    session, dataset_id, start, stop, mode, page_size,
-                    get_count=source_count, make_where=where_clause, order=ORDER,
-                    refresh_history=refresh,
-                )
-                finished += 1
-                total_rows += archive.row_count
-                LOG.info("%s %s to %s: %d rows archived at %s",
-                         DATASETS[dataset_id][0], start, stop,
-                         archive.row_count, archive.manifest_path)
-    return finished, total_rows
-
-
-
-def verify_local_archives(datasets: list[str]) -> tuple[int, int]:
-    """Verify all saved JSON files without any API or database connection."""
-    root = archive_root()
-    count, total_rows = 0, 0
-    for path in sorted(root.glob("*/*/*/*/manifest.json")):
-        manifest = json.loads(path.read_text(encoding="utf-8"))
-        if manifest.get("dataset_id") not in datasets:
-            continue
-        archive = SourceArchive(path.parent, manifest)
-        validate_archive(archive)
-        count += 1
-        total_rows += archive.row_count
-        print(f"OK {manifest['dataset_id']} {manifest['mode']} "
-              f"{manifest['from_date']} to {manifest['to_date_exclusive']} "
-              f"{archive.row_count} rows | {path}")
-    if count == 0:
-        print(f"No original CFTC snapshots found under {root}")
-    return count, total_rows
+        for start, stop in windows:
+            for dataset_id in datasets:
+                try:
+                    ndates, changed, total = download_window(
+                        session, dataset_id, start, stop, page_size
+                    )
+                except Exception:
+                    LOG.exception("FAILED dataset=%s window=%s..%s; no partial "
+                                  "dataset-window was written", dataset_id, start, stop)
+                    raise
+                dates += ndates
+                files += changed
+                rows += total
+                LOG.info("%s %s..%s: %d dates, %d new/updated files, %d rows",
+                         DATASETS[dataset_id][0], start, stop, ndates, changed, total)
+    return dates, files, rows
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Download and validate original CFTC COT JSON to OneDrive. No DB access."
+        description="CFTC raw records organised as OneDrive/COT/YYYY-MM-DD/<report>.json"
     )
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("history", "weekly"):
-        p = sub.add_parser(name)
-        p.add_argument("--datasets", default="all", help="all, Socrata IDs, or report codes")
-        p.add_argument("--page-size", type=int, default=3000)
-        if name == "history":
-            p.add_argument("--start-year", type=int)
-            p.add_argument("--end-year", type=int)
-            p.add_argument("--refresh", action="store_true", help="Archive a new complete historical snapshot")
-        else:
-            p.add_argument("--lookback-days", type=int, default=56)
-    checker = sub.add_parser("verify", help="Verify saved original JSON files without API/DB")
-    checker.add_argument("--datasets", default="all")
+    history = sub.add_parser("history", help="Download 2019 to today by CFTC report date")
+    history.add_argument("--start-year", type=int, default=2019)
+    history.add_argument("--end-year", type=int)
+    history.add_argument("--datasets", default="all")
+    history.add_argument("--page-size", type=int, default=3000)
+    weekly = sub.add_parser("weekly", help="Refresh latest weeks after CFTC release")
+    weekly.add_argument("--lookback-days", type=int, default=56)
+    weekly.add_argument("--datasets", default="all")
+    weekly.add_argument("--page-size", type=int, default=3000)
+    checker = sub.add_parser("verify", help="Check all YYYY-MM-DD report files")
+    checker.add_argument("--start-year", type=int, default=2019)
+    migration = sub.add_parser("migrate", help="Reuse existing old-layout CFTC JSON archives")
+    migration.add_argument("--start-year", type=int, default=2019)
+    migration.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
         if args.command == "verify":
-            count, rows = verify_local_archives(check_dataset_selection(args.datasets))
-            print(f"Validated {count} original-file snapshots and {rows} rows.")
-            return 0 if count else 1
-        count, rows = download(
-            args.command,
-            check_dataset_selection(args.datasets),
-            start_year=getattr(args, "start_year", None),
+            dates, files, rows = verify_weekly_files(date(args.start_year, 1, 1))
+            print(f"Verified {dates} COT dates, {files} JSON files, {rows} records at {root_path()}")
+            return 0 if files else 1
+        if args.command == "migrate":
+            dates, files = migrate_old_archives(args.start_year, dry_run=args.dry_run)
+            print(f"Reused old archives: {dates} date groups examined, "
+                  f"{files} new date files {'would be created' if args.dry_run else 'created'}.")
+            print("Old source archive remains untouched; do not delete it without verification.")
+            return 0
+        dates, changed, rows = run_download(
+            args.command, check_dataset_selection(args.datasets),
+            start_year=getattr(args, "start_year", 2019),
             end_year=getattr(args, "end_year", None),
             lookback_days=getattr(args, "lookback_days", 56),
             page_size=args.page_size,
-            refresh=getattr(args, "refresh", False),
         )
-        print(f"Downloaded/validated {count} dataset-windows containing {rows} source rows.")
-        print(f"Source archive: {archive_root()}")
+        print(f"Processed {dates} report-date groups, saved {changed} changed JSON files; "
+              f"validated {rows} CFTC records.")
+        print(f"COT folder: {root_path()}")
         return 0
     except Exception as exc:
-        LOG.exception("CFTC original-file download failed: %s", exc)
+        LOG.exception("CFTC download failed: %s", exc)
         return 1
 
 
