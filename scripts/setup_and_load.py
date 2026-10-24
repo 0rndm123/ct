@@ -12,6 +12,7 @@ Usage from repo root:
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 from datetime import date, datetime, timezone
 from getpass import getpass
 from pathlib import Path
@@ -25,7 +26,7 @@ from setup_cot import bootstrap, secret_for
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from cot_ingest.import_weekly import import_files, verify_db
-from cot_ingest.weekly_files import verify_weekly_files, root_path
+from cot_ingest.weekly_files import verify_weekly_files, root_path, iterate_weekly_files, KNOWN_CODES
 
 LOG = logging.getLogger("cot.first_load")
 
@@ -39,6 +40,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--admin-user", default=os.getenv("COT_ADMIN_USER", "postgres"))
     parser.add_argument("--start-year", type=int, default=2019)
     parser.add_argument("--setup-only", action="store_true")
+    parser.add_argument("--allow-partial", action="store_true",
+                        help="Import selected available files even if some years or report families are missing")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
@@ -53,6 +56,30 @@ def main(argv: list[str] | None = None) -> int:
                     f"No date-folder CFTC JSON files found at {root_path()} "
                     f"from {args.start_year}. Run scripts\\download_history.bat first."
                 )
+            years: dict[int,set[str]] = defaultdict(set)
+            dates_by_year: dict[int,set[date]] = defaultdict(set)
+            for when, code, _ in iterate_weekly_files(first_date):
+                if when.year > this_year:
+                    raise RuntimeError(f"Unexpected future COT position date: {when}")
+                years[when.year].add(code)
+                dates_by_year[when.year].add(when)
+            missing_years = sorted(set(range(args.start_year,this_year+1)) - set(years))
+            missing_types = {
+                year: sorted(KNOWN_CODES - codes)
+                for year,codes in years.items()
+                if KNOWN_CODES - codes
+            }
+            if missing_years or missing_types:
+                print(f"WARNING: Missing COT years: {missing_years}; "
+                      f"missing report families by year: {missing_types}")
+                if not args.allow_partial:
+                    raise RuntimeError(
+                        "Incomplete local COT coverage. Run scripts\\download_history.bat "
+                        "or use --allow-partial for a controlled pilot."
+                    )
+            for year in sorted(dates_by_year):
+                print(f"  {year}: {len(dates_by_year[year])} distinct COT dates, "
+                      f"{len(years[year])}/7 report families")
             print(f"Found {dates} COT report dates, {files} source files, "
                   f"{rows} records from {args.start_year} onward.")
 
