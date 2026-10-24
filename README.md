@@ -22,39 +22,59 @@ The primary data source is **the official CFTC Socrata API**, not a paid or thir
 
 CFTC documentation states that **no provided ID column is a guaranteed primary key**. The local key combines report dataset, position date, CFTC contract market code, and market/exchange name; any duplicate source keys within the same extraction window are rejected rather than silently discarded.
 
-## Setup (Windows / PowerShell)
+## Locations and installation
 
-1. Install PostgreSQL, Python 3.11+, and Git.
-2. In the repository root create a virtual environment and install dependencies:
+| Purpose | Location |
+| --- | --- |
+| Repository (source code) | `D:\OD\OneDrive\tech\GitHub\rndm123\ct` |
+| Archived, original CFTC API files | `D:\OD\OneDrive\Fin\data\COT` |
+| PostgreSQL database | `"COT"` |
+| PostgreSQL schema | `cot` |
 
-   ```powershell
-   py -3 -m venv .venv
-   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-   ```
+**Original files are saved and validated in OneDrive BEFORE updating PostgreSQL.** Each API response page is stored as an unmodified JSON file, together with a manifest containing source URL, exact query, SHA-256 hash, row count and UTC timestamp. Files are immutable and auditable. History is reused locally; new weekly snapshots are kept.
 
-3. Create the dedicated database using `psql -d postgres -f sql/00_create_database.sql` (the account needs `CREATEDB`).
-4. Set `COT_DATABASE_URL` to a PostgreSQL DSN for the **same database role used to create the schema** (or grant explicit privileges). Example: `postgresql://postgres@localhost:5432/COT`. Prefer a local PostgreSQL password file (`%APPDATA%\\postgresql\\pgpass.conf`) over putting credentials in BAT files. For Task Scheduler, set the connection environment for that Windows account persistently. Never commit credentials.
-5. Apply `psql -d COT -f sql/01_schema.sql` (or run `scripts\init_db.bat` after configuring `PGUSER`/`PGHOST`).
-6. Run tests with `.\\.venv\\Scripts\\python.exe -m unittest discover -s tests -v`, then pilot one year with `scripts\\load_history.bat --start-year 2025 --end-year 2025`.
-7. Run the initial full history load: `scripts\load_history.bat`. This may require many API requests; it is resumable through idempotent upserts and logged ingestion windows.
-8. Run each week: `scripts\update_weekly.bat`, optionally scheduled with Windows Task Scheduler for **Saturday morning** after the usual Friday release.
+The local PostgreSQL setup provisions two separate accounts: `cot_loader` (schema owner, read/write ingestion) and `cot_app` (read-only applications). Passwords are chosen interactively on the Windows computer and are **never committed to this repo**.
 
-You can instead invoke the CLI:
+For full details see **[Windows installation, passwords, raw file layout, and validation](docs/windows_setup.md)**.
+
+Quick start from the repository root (requires local PostgreSQL, Python 3.11+, and `psql` on PATH):
+
+```powershell
+git pull origin main
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\scripts\init_db.bat
+.\scripts\set_passwords.bat
+```
+
+Then set up libpq credential storage on the local machine (`%APPDATA%\postgresql\pgpass.conf`) and configure:
+
+```powershell
+$env:COT_DATABASE_URL = "postgresql://cot_loader@localhost:5432/COT"
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\scripts\load_history.bat --start-year 2025 --end-year 2025
+.\scripts\verify.bat
+# Once the pilot is validated:
+.\scripts\load_history.bat
+.\scripts\update_weekly.bat
+```
+
+Advanced commands:
 
 ```powershell
 .\.venv\Scripts\python.exe -m cot_ingest.cli list-datasets
-.\.venv\Scripts\python.exe -m cot_ingest.cli history --start-year 2025 --end-year 2025
-.\.venv\Scripts\python.exe -m cot_ingest.cli history
-.\.venv\Scripts\python.exe -m cot_ingest.cli weekly --lookback-days 56
-.\.venv\Scripts\python.exe -m cot_ingest.cli verify
+.\scripts\load_history.bat --start-year 2025 --end-year 2025 --offline
+.\scripts\load_history.bat --start-year 2025 --end-year 2025 --refresh-archive
 ```
+
+Schedule the weekly BAT after the usual Friday release once the manual pipeline has been integration-tested. A 56-day position-date overlap captures delayed publications, with an immutable raw snapshot per execution.
 
 ## Data model
 
 - `cot.datasets`: source catalog; seven CFTC datasets.
 - `cot.reports`: one row per contract market, dataset, and CFTC **position date** (usually Tuesday). Contains full original `payload JSONB`, source hash, searchable identifiers, open interest, and ingestion timestamps.
 - `cot.report_revisions`: audit log when an API payload changes.
-- `cot.ingest_runs`, `cot.ingest_windows`: execution tracking and source-vs-processed row count checks.
+- `cot.ingest_runs`, `cot.ingest_windows`: execution tracking and source-vs-processed row count checks, with a local original-file manifest path for each ingestion window.
 - `cot.v_latest_reports`, `cot.v_numeric_metrics`: analytical views (the latter expands numeric raw fields dynamically, including currently unknown CFTC numeric columns).
 
 ## Data quality and interpretation
@@ -65,7 +85,7 @@ You can instead invoke the CLI:
 - Historical data includes contract launches, retirements, category changes and classification methodology limitations; no assumption of a stable instrument universe.
 - The CFTC covers **reportable US-regulated futures markets**, not all worldwide asset positions or spot cryptocurrency exchange flows.
 - The official legacy Futures Only history is available from 1986 but pre-September-1992 records are not weekly. The historical disaggregated and TFF series backfill to June 2006, subject to the CFTC's retrospective classification limitations.
-- The official annual ZIP files are a future reconciliation/fallback path; API is the single implemented primary source in this first version.
+- The official annual ZIP files are a future reconciliation/fallback path; API JSON response files are the original files archived in this implementation, not annual ZIP downloads.
 
 ## Suggested validation gates
 
