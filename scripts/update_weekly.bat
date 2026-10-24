@@ -1,18 +1,10 @@
 @echo off
-setlocal
-pushd "%~dp0.."
-if not exist ".venv\Scripts\python.exe" (
-    echo ERROR: Create the virtual environment and install requirements first.
-    popd
+REM Official CFTC download -> OneDrive position-date files -> PostgreSQL COT.
+REM Only after setup and manual validation of the initial history.
+call "%~dp0download_weekly.bat"
+if errorlevel 1 (
+    echo ERROR: Weekly CFTC download failed; PostgreSQL unchanged.
     exit /b 1
 )
-if not defined COT_DATABASE_URL (
-    echo ERROR: COT_DATABASE_URL is not set.
-    popd
-    exit /b 1
-)
-REM Overlap 56 days to recover delayed runs. Date is the CFTC position date, not release date.
-".venv\Scripts\python.exe" -m cot_ingest.cli weekly --lookback-days 56 %*
-set "RC=%ERRORLEVEL%"
-popd
-exit /b %RC%
+call "%~dp0import_weekly.bat"
+exit /b %ERRORLEVEL%
