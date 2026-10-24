@@ -23,6 +23,7 @@ import sys
 import psycopg
 
 from setup_cot import bootstrap, secret_for
+from check_schema import validate_sql_files
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from cot_ingest.import_weekly import import_files, verify_db
@@ -45,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
+        # Never ask for secrets while an outdated/broken SQL file is present.
+        validate_sql_files()
         this_year = datetime.now(timezone.utc).year
         if not 1986 <= args.start_year <= this_year:
             raise ValueError("Start year outside supported range")
