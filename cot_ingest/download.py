@@ -66,8 +66,8 @@ def run_download(mode: str, datasets: list[str], *,
                  start_year: int = 2019, end_year: int | None = None,
                  lookback_days: int = 56, page_size: int = 3000) -> tuple[int, int, int]:
     now = datetime.now(timezone.utc).date()
-    if not 2019 <= start_year <= now.year:
-        raise ValueError(f"Start year must be between 2019 and {now.year}")
+    if not 1986 <= start_year <= now.year:
+        raise ValueError(f"Start year must be between 1986 and {now.year}")
     if end_year is not None and not start_year <= end_year <= now.year:
         raise ValueError(f"End year must be between {start_year} and {now.year}")
     if not 1 <= page_size <= 10000:
@@ -86,6 +86,8 @@ def run_download(mode: str, datasets: list[str], *,
     with api_session() as session:
         for start, stop in windows:
             for dataset_id in datasets:
+                if mode == "history" and start.year < DATASETS[dataset_id][1]:
+                    continue
                 try:
                     ndates, changed, total = download_window(
                         session, dataset_id, start, stop, page_size
