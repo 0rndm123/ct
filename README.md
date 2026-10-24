@@ -2,6 +2,30 @@
 
 **For the current PostgreSQL setup and loading process, follow [the COT import guide](docs/postgres_load.md).** The existing database is retained, source files remain in weekly date folders, and the recommended first-load command is `scripts\\setup_and_load.bat`.
 
+## One command from PowerShell
+
+From the cloned CT repository, run `git pull origin main` and then:
+
+```powershell
+.\INSTALL_COT.bat
+```
+
+This single BAT installs Python dependencies, downloads CFTC JSON reports from
+**2019 through the present year (including 2026)** into
+`D:\OD\OneDrive\Fin\data\COT\YYYY-MM-DD`, verifies them, creates
+all tables and roles inside the **existing PostgreSQL database COT**, asks
+for the administrator and separate loader/app passwords, and imports the JSON.
+
+To use the **JSON files already present** without redownloading anything:
+
+```powershell
+.\INSTALL_COT.bat --existing
+```
+
+No database is dropped, no other database is touched, and credentials are not
+written to Git. This is a first-time setup command; for recurring weekly
+updates use `scripts\update_weekly.bat` after configuring loader authentication.
+
 Independent Python/PostgreSQL ingestion project. Target PostgreSQL database: **COT** (separate from SysTrd/TRD).
 
 ## Official source
