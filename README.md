@@ -37,6 +37,9 @@ The local PostgreSQL setup provisions two separate accounts: `cot_loader` (schem
 
 For full details see **[Windows installation, passwords, raw file layout, and validation](docs/windows_setup.md)**.
 
+**If `COT` has already been created manually in pgAdmin**, do not run the database creation step again. Follow **[Continue from an existing COT database in pgAdmin 4](docs/pgadmin_existing_database.md)**. It provides a pure SQL role setup file and avoids relying on `psql.exe` being present on PATH.
+
+
 Quick start from the repository root (requires local PostgreSQL, Python 3.11+, and `psql` on PATH):
 
 ```powershell
