@@ -22,76 +22,43 @@ The primary data source is **the official CFTC Socrata API**, not a paid or thir
 
 CFTC documentation states that **no provided ID column is a guaranteed primary key**. The local key combines report dataset, position date, CFTC contract market code, and market/exchange name; any duplicate source keys within the same extraction window are rejected rather than silently discarded.
 
-## Start here (existing database + original downloads)
+## Position-date files since 2019
 
-**[Quick start: one SQL setup, one Python setup, and independent CFTC downloads](docs/quickstart.md)**
+**[Date-first COT storage, historic download, import and migration guide](docs/date_based_storage.md)**
 
-The PostgreSQL `"COT"` database has already been created manually. Run `scripts/setup_cot.bat` for accounts/passwords/schema, or `sql/setup_existing_cot.sql` from pgAdmin for the SQL-only provisioning step. For the original files **you do not need to wait for database configuration**:
+Keep Git source at `D:\OD\OneDrive\tech\GitHub\rndm123\ct`.
+Original CFTC report records are saved to `D:\OD\OneDrive\Fin\data\COT\YYYY-MM-DD\<report>.json`.
 
-```powershell
-python -m pip install "requests>=2.32,<3"
-.\scripts\download_history.bat --start-year 2025 --end-year 2025
-python -m cot_ingest.download verify
-```
+One date folder corresponds to the **CFTC report reference/position date** (usually Tuesday),
+never the download date. There are up to seven meaningful report-type JSON filenames in that folder.
+Raw JSON record fields are preserved, with one array per report family and position date.
 
-The default raw archive is `D:\OD\OneDrive\Fin\data\COT`, separate from the unchanged source-code repository.
-
-## Locations and installation
-
-| Purpose | Location |
-| --- | --- |
-| Repository (source code) | `D:\OD\OneDrive\tech\GitHub\rndm123\ct` |
-| Archived, original CFTC API files | `D:\OD\OneDrive\Fin\data\COT` |
-| PostgreSQL database | `"COT"` |
-| PostgreSQL schema | `cot` |
-
-**Original files are saved and validated in OneDrive BEFORE updating PostgreSQL.** Each API response page is stored as an unmodified JSON file, together with a manifest containing source URL, exact query, SHA-256 hash, row count and UTC timestamp. Files are immutable and auditable. History is reused locally; new weekly snapshots are kept.
-
-The local PostgreSQL setup provisions two separate accounts: `cot_loader` (schema owner, read/write ingestion) and `cot_app` (read-only applications). Passwords are chosen interactively on the Windows computer and are **never committed to this repo**.
-
-For full details see **[Windows installation, passwords, raw file layout, and validation](docs/windows_setup.md)**.
-
-**If `COT` has already been created manually in pgAdmin**, do not run the database creation step again. Follow **[Continue from an existing COT database in pgAdmin 4](docs/pgadmin_existing_database.md)**. It provides a pure SQL role setup file and avoids relying on `psql.exe` being present on PATH.
-
-
-Quick start from the repository root (requires local PostgreSQL, Python 3.11+, and `psql` on PATH):
+Use the following from an activated Python environment in the Git repo:
 
 ```powershell
 git pull origin main
-py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\scripts\init_db.bat
-.\scripts\set_passwords.bat
+python -m pip install "requests>=2.32,<3"
+.\scripts\organize_existing.bat
+.\scripts\download_history.bat
+.\scripts\verify_files.bat
 ```
 
-Then set up libpq credential storage on the local machine (`%APPDATA%\postgresql\pgpass.conf`) and configure:
+Default complete history downloads **2019 through the current year**, for all seven CFTC datasets.
+The existing legacy raw archive is not removed; use the organiser to reuse it, then move it
+outside COT only after checking coverage. Current weekly source refresh: `scripts\download_weekly.bat`.
 
-```powershell
-$env:COT_DATABASE_URL = "postgresql://cot_loader@localhost:5432/COT"
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-.\scripts\load_history.bat --start-year 2025 --end-year 2025
-.\scripts\verify.bat
-# Once the pilot is validated:
-.\scripts\load_history.bat
-.\scripts\update_weekly.bat
-```
-
-Advanced commands:
-
-```powershell
-.\.venv\Scripts\python.exe -m cot_ingest.cli list-datasets
-.\scripts\load_history.bat --start-year 2025 --end-year 2025 --offline
-.\scripts\load_history.bat --start-year 2025 --end-year 2025 --refresh-archive
-```
-
-Schedule the weekly BAT after the usual Friday release once the manual pipeline has been integration-tested. A 56-day position-date overlap captures delayed publications, with an immutable raw snapshot per execution.
+For independent database setup in existing PostgreSQL `"COT"`, run `scripts\setup_cot.bat`
+after installing psycopg and authenticating as PostgreSQL administrator. Then, with
+`COT_DATABASE_URL` set for `cot_loader`, run `scripts\import_history.bat`.
+Weekly end-to-end download then import: `scripts\update_weekly.bat`.
+Applications should use read-only `cot_app` credentials.
 
 ## Data model
 
 - `cot.datasets`: source catalog; seven CFTC datasets.
 - `cot.reports`: one row per contract market, dataset, and CFTC **position date** (usually Tuesday). Contains full original `payload JSONB`, source hash, searchable identifiers, open interest, and ingestion timestamps.
 - `cot.report_revisions`: audit log when an API payload changes.
-- `cot.ingest_runs`, `cot.ingest_windows`: execution tracking and source-vs-processed row count checks, with a local original-file manifest path for each ingestion window.
+- `cot.ingest_runs`, `cot.ingest_windows`: execution tracking and source-vs-processed row count checks, with a source-file path for each ingestion window.
 - `cot.v_latest_reports`, `cot.v_numeric_metrics`: analytical views (the latter expands numeric raw fields dynamically, including currently unknown CFTC numeric columns).
 
 ## Data quality and interpretation
