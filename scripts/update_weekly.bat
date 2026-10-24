@@ -6,7 +6,7 @@ if not exist ".venv\Scripts\python.exe" (
     popd
     exit /b 1
 )
-if "%COT_DATABASE_URL%"=="" (
+if not defined COT_DATABASE_URL (
     echo ERROR: COT_DATABASE_URL is not set.
     popd
     exit /b 1
