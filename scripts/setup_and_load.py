@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 from datetime import date, datetime, timezone
 from getpass import getpass
+from pathlib import Path
 import logging
 import os
 import sys
@@ -22,8 +23,7 @@ import psycopg
 
 from setup_cot import bootstrap, secret_for
 
-# Running scripts/setup_and_load.py adds scripts/ to sys.path, but not
-# the repository root; BAT launcher switches to root and PYTHONPATH includes it.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from cot_ingest.import_weekly import import_files, verify_db
 from cot_ingest.weekly_files import verify_weekly_files, root_path
 
