@@ -3,9 +3,12 @@
 ## Requirements
 - Separate **PostgreSQL database `"COT"`**, not a schema in SysTrd/TRD. Schema `cot` lives only in that database.
 - Official CFTC source of truth. Entire history, all seven report datasets, weekly refresh.
+- Original CFTC API JSON response files archived under `D:\\OD\\OneDrive\\Fin\\data\\COT`, before any report rows are changed.
 - Full raw columns retained in JSONB; no data loss from heterogeneous report formats.
 - Safe reruns (UPSERT), detecting duplicates, unexpected row losses, source count mismatches and revisions.
+- Code stays in `D:\\OD\\OneDrive\\tech\\GitHub\\rndm123\\ct`; raw files are stored separately.
 - Batch launchers for Windows; credentials never hard-coded into BAT/SQL/GitHub.
+- `cot_loader` schema owner for ingestion; separate `cot_app` read-only account for external apps.
 
 ## Source decision
 - Primary: CFTC Public Reporting Environment, Socrata API `/resource/{dataset_id}.json`.
@@ -18,18 +21,22 @@
 - PostgreSQL dataset registry; one common table with a composite business key and `payload JSONB`; audit of changed values. Raw numeric columns can be accessed via `cot.v_numeric_metrics`.
 - `id` is stored but **not used as a primary key**, reflecting CFTC's statement that there is no primary key.
 - Source API pagination uses ordered pages, bounded year windows for historical work and an overlap window for weekly.
+- Immutable source snapshots store the original JSON bodies and SHA-256 manifest for each page. Ingestion only runs after validating the archive.
+- Archive manifests are recorded in `cot.ingest_windows.archive_manifest`. Historic archives are reused; weekly snapshots are never silently overwritten.
 - A yearly/windowed download must match CFTC source count; the DB must match its source total for the same window. Failure is explicit. No destructive automatic cleanup.
 - Maintain a session-level advisory lock to prevent two ingesters operating simultaneously.
 - All operations explicitly reject any PostgreSQL database other than `"COT"`.
 
 ## Initial rollout gates
-1. Validate source metadata/API schema and accessibility with a single report year first.
-2. Create `"COT"`; execute schema SQL, inspect seven registry rows.
-3. Pilot `history --start-year 2025 --end-year 2025`, check all seven ingestion windows.
-4. Rerun the same pilot; rows must remain constant; revisions should remain zero.
-5. Load history for all families, review 1986/1992/1995/2006 data boundaries.
-6. Schedule weekly process for Saturday in Portuguese local time. Rerun on holiday release delays (a 56-day overlap catches missed updates at the next run).
-7. Before using COT in a trading backtest, separately implement a verified release-availability calendar or a conservative release lag; Tuesday positioning cannot be known on Tuesday.
+1. Run `scripts/init_db.bat` (create `COT`, `cot_loader`, `cot_app`) and `scripts/set_passwords.bat` locally.
+2. Check the original files are written to the finance OneDrive directory, not to the Git repository.
+3. Validate source metadata/API schema and accessibility with a single report year first.
+4. Check the schema and inspect all seven registry rows.
+5. Pilot `history --start-year 2025 --end-year 2025`, check all seven ingestion windows.
+6. Rerun the same pilot; rows must remain constant; revisions should remain zero.
+7. Load history for all families, review 1986/1992/1995/2006 data boundaries.
+8. Schedule weekly process for Saturday in Portuguese local time. Rerun on holiday release delays (a 56-day overlap catches missed updates at the next run).
+9. Before using COT in a trading backtest, separately implement a verified release-availability calendar or a conservative release lag; Tuesday positioning cannot be known on Tuesday.
 
 ## Explicitly deferred
 - Cross-check against ZIP archive row counts and sample values (second source implementation).
