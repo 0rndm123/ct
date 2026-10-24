@@ -30,3 +30,29 @@ GROUP BY dataset_id ORDER BY dataset_id;
 SELECT dataset_id,count(*) FILTER (WHERE open_interest < 0) AS negative_oi,
        count(*) FILTER (WHERE open_interest IS NULL) AS missing_oi
 FROM cot.reports GROUP BY dataset_id ORDER BY dataset_id;
+
+\echo '== Files tracked in PostgreSQL, by year and source dataset =='
+SELECT d.report_code, EXTRACT(YEAR FROM s.report_date)::int AS cot_year,
+       count(*) AS files, sum(s.row_count) AS source_rows,
+       min(s.report_date) AS first_date, max(s.report_date) AS last_date
+FROM cot.source_files s JOIN cot.datasets d USING (dataset_id)
+GROUP BY d.report_code, EXTRACT(YEAR FROM s.report_date)
+ORDER BY d.report_code,cot_year;
+\echo '== Difference between archived file row counts and PostgreSQL =='
+WITH db_counts AS (
+    SELECT dataset_id,report_date,count(*) AS db_rows
+    FROM cot.reports GROUP BY dataset_id,report_date
+)
+SELECT d.report_code,s.report_date,s.row_count AS file_rows,
+       coalesce(r.db_rows,0) AS db_rows,s.source_file
+FROM cot.source_files s
+JOIN cot.datasets d USING (dataset_id)
+LEFT JOIN db_counts r USING (dataset_id,report_date)
+WHERE s.row_count IS DISTINCT FROM r.db_rows
+ORDER BY s.report_date DESC LIMIT 30;
+\echo '== Current complete-week coverage =='
+SELECT report_date,count(*) AS report_types,
+       sum(contract_rows) AS total_contract_records
+FROM cot.v_report_coverage
+WHERE report_date >= DATE '2019-01-01'
+GROUP BY report_date ORDER BY report_date DESC LIMIT 20;
