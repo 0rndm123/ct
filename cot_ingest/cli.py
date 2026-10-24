@@ -175,7 +175,14 @@ def connect_db() -> psycopg.Connection:
     dsn = os.getenv("COT_DATABASE_URL")
     if not dsn:
         raise RuntimeError("COT_DATABASE_URL is required (database name must be COT)")
-    return psycopg.connect(dsn, autocommit=True, connect_timeout=15)
+    conn = psycopg.connect(dsn, autocommit=True, connect_timeout=15)
+    actual_db = conn.execute("SELECT current_database()").fetchone()[0]
+    if actual_db != "COT":
+        conn.close()
+        raise RuntimeError(
+            f"Refusing to ingest into database {actual_db!r}; expected exactly 'COT'."
+        )
+    return conn
 
 def ingest_window(
     conn: psycopg.Connection, session: requests.Session,
