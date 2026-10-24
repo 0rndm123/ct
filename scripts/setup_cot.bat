@@ -1,13 +1,17 @@
 @echo off
 setlocal
 pushd "%~dp0.."
-if not exist ".venv\Scripts\python.exe" (
-  echo ERROR: Python virtual environment missing. Run: py -3 -m venv .venv
-  popd
-  exit /b 1
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" scripts\setup_cot.py %*
+) else (
+    where python >nul 2>nul
+    if errorlevel 1 (
+        echo ERROR: Python not found. Activate your conda environment or install Python.
+        popd
+        exit /b 1
+    )
+    python scripts\setup_cot.py %*
 )
-REM Interactive admin and role passwords. Does not create/drop the database.
-".venv\Scripts\python.exe" scripts\setup_cot.py %*
 set "RC=%ERRORLEVEL%"
 popd
 exit /b %RC%
