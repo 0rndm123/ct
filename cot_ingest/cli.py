@@ -46,6 +46,7 @@ DO UPDATE SET
     payload=EXCLUDED.payload,
     payload_sha256=EXCLUDED.payload_sha256,
     last_checked_at=now()
+WHERE cot.reports.payload_sha256 IS DISTINCT FROM EXCLUDED.payload_sha256
 """
 
 def iter_source_pages(
