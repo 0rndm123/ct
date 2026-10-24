@@ -22,7 +22,7 @@ from urllib3.util.retry import Retry
 LOG = logging.getLogger("cot")
 BASE = "https://publicreporting.cftc.gov/resource"
 DATE_FIELD = "report_date_as_yyyy_mm_dd"
-ORDER = "report_date_as_yyyy_mm_dd ASC, cftc_contract_market_code ASC, market_and_exchange_names ASC, id ASC"
+ORDER = "report_date_as_yyyy_mm_dd ASC, cftc_contract_market_code ASC, market_and_exchange_names ASC"
 
 # id -> (readable code, earliest year). No dataset is silently omitted.
 DATASETS: dict[str, tuple[str, int]] = {
