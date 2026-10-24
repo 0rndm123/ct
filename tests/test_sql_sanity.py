@@ -1,12 +1,27 @@
 """Guard against truncated COT schema SQL and duplicated trailing DDL."""
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+from scripts.check_schema import validate_sql_files, VERSION
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class SqlSchemaSanityTests(unittest.TestCase):
+    def test_preflight_current_repo_and_reject_stale_version(self):
+        validate_sql_files()
+        with TemporaryDirectory() as td:
+            fake_schema = Path(td) / "01_schema.sql"
+            actual = (ROOT / "sql" / "01_schema.sql").read_text(encoding="utf-8")
+            self.assertIn(VERSION, actual)
+            fake_schema.write_text(actual.replace(VERSION, "-- OLD_SCHEMA", 1), encoding="utf-8")
+            with patch("scripts.check_schema.SCHEMA", fake_schema):
+                with self.assertRaisesRegex(RuntimeError, "STALE / INVALID"):
+                    validate_sql_files()
+
     def test_expected_single_definitions_and_clean_transaction(self):
         for relative in ("sql/01_schema.sql", "sql/setup_existing_cot.sql"):
             with self.subTest(relative=relative):
