@@ -1,128 +1,89 @@
-# CT quick start: existing COT database and raw CFTC file downloads
+# CT quick start: COT in one folder per reference date
 
-The PostgreSQL database `"COT"` already exists, but has not been populated.
+## Locations
 
-**Do not move the repository.** The paths are independent:
+Code repository: D:\OD\OneDrive\tech\GitHub\rndm123\ct
+Data folder: D:\OD\OneDrive\Fin\data\COT
+PostgreSQL database: "COT" (already created manually)
 
-| Purpose | Windows path |
-|---|---|
-| Git source repository | `D:\OD\OneDrive\tech\GitHub\rndm123\ct` |
-| Original CFTC files | `D:\OD\OneDrive\Fin\data\COT` |
-| Database | PostgreSQL `"COT"` on `localhost:5432` |
-| Schema | `cot` |
+The user-visible file structure is:
 
-## 1. Pull the current repository
+    COT\
+      2019-01-01\
+        legacy_futures.json
+        legacy_combined.json
+        disaggregated_futures.json
+        disaggregated_combined.json
+        tff_futures.json
+        tff_combined.json
+        supplemental_cit.json
+      2019-01-08\
+        ...
+      2026-10-20\
+        ...
 
-Use PowerShell in the existing Conda environment (e.g. `env_systrd`):
+Dates refer to CFTC **position dates**, not download dates. The examples above
+only illustrate folder naming. CFTC history can contain reporting exceptions.
 
-```powershell
-cd "D:\OD\OneDrive\tech\GitHub\rndm123\ct"
-git remote set-url origin git@github-rndm123:0rndm123/ct.git
-git pull origin main
-```
+## Pull code (PowerShell)
 
-## 2. Start downloading original CFTC history now, independently of PostgreSQL
+    cd "D:\OD\OneDrive\tech\GitHub\rndm123\ct"
+    git remote set-url origin git@github-rndm123:0rndm123/ct.git
+    git pull origin main
 
-Only Python and `requests` are necessary to download files. No DB password is required:
+## Download from 2019, independently of PostgreSQL
 
-```powershell
-python -m pip install "requests>=2.32,<3"
-.\scripts\download_history.bat --start-year 2025 --end-year 2025
-```
+    python -m pip install "requests>=2.32,<3"
+    .\scripts\organize_existing.bat
+    .\scripts\download_history.bat
+    .\scripts\verify_files.bat
 
-The pilot downloads **all seven** official CFTC report datasets for calendar year 2025. You can instead start with one family:
+Organise reuses legacy archives without removing the old originals. The historic
+download covers all seven CFTC datasets for 2019 through the present. A pilot is:
 
-```powershell
-.\scripts\download_history.bat --start-year 2025 --end-year 2025 --datasets tff_futures
-```
+    .\scripts\download_history.bat --start-year 2019 --end-year 2019
 
-Then, download **all available years of all seven datasets**:
+Weekly download of the latest eight weeks:
 
-```powershell
-.\scripts\download_history.bat
-```
+    .\scripts\download_weekly.bat
 
-The full download is multi-year and makes many requests. It will reuse validated existing annual snapshots if interrupted and rerun.
+Source fields are preserved in per-date JSON arrays. Files are overwritten only
+if the upstream contents changed. No DB connection is used for download.
 
-Verify the stored raw files (no network/database):
+To remove old visual clutter, once complete coverage is verified, manually
+move the old raw hierarchy OUTSIDE the COT folder as a backup. The scripts do
+not delete prior API bytes without permission.
 
-```powershell
-python -m cot_ingest.download verify
-```
+## Set up the already existing PostgreSQL database
 
-The downloader stores each exact official Socrata API JSON response body without rewriting it. It groups immutable snapshots as:
+    python -m pip install "psycopg[binary]>=3.2,<4"
+    .\scripts\setup_cot.bat
 
-```text
-D:\OD\OneDrive\Fin\data\COT\raw\cftc_api
-  6dca-aqww
-    history
-      2025
-        20261024T...-<unique>
-          page_00000.json
-          page_00001.json
-          manifest.json
-  jun7-fc8e
-  72hh-3qpy
-  kh3c-gbw2
-  gpe5-46if
-  yw9f-hn96
-  4zgm-a668
-```
+This asks interactively for the PostgreSQL admin password and separate
+cot_loader/cot_app passwords, creates or verifies schema/tables and grants.
+Never commit passwords. For a SQL-only alternative, use
+sql/setup_existing_cot.sql in pgAdmin as administrator, but this does not
+choose passwords.
 
-File timestamps and names above are **illustrative**. The manifest records the CFTC dataset, source request URL, report date range, downloaded timestamp UTC, row count, page size, original file size and SHA-256. Each full, validated download is promoted from `.staging` into its final folder. Incomplete source downloads do not get promoted.
+Configure COT_DATABASE_URL for cot_loader securely, using OS/libpq secret
+storage, then import from local weekly JSON files:
 
-To capture a new immutable snapshot of a historical year that is already archived:
+    .\scripts\import_history.bat
+    .\scripts\import_weekly.bat
 
-```powershell
-.\scripts\download_history.bat --start-year 2025 --end-year 2025 --refresh
-```
+The weekly end-to-end BAT downloads from CFTC and then imports into COT:
 
-To download weekly snapshots after CFTC publishes the new report:
+    .\scripts\update_weekly.bat
 
-```powershell
-.\scripts\download_weekly.bat
-```
+Apps connect with cot_app for read-only SELECT access, not cot_loader.
 
-The weekly mode revisits the most recent 56 days of **position dates** and keeps new raw snapshots; source data may be revised or released late. A Saturday run is usually appropriate, but holidays require care.
+## Caveats
 
-## 3. Finish setting up the existing COT database
-
-Install the PostgreSQL Python driver in the active environment:
-
-```powershell
-python -m pip install "psycopg[binary]>=3.2,<4"
-.\scripts\setup_cot.bat
-```
-
-This Python script connects to existing `"COT"` on `localhost:5432` as admin (`postgres` by default). It interactively requests:
-- PostgreSQL administrator password.
-- New `cot_loader` password, twice.
-- New `cot_app` password, twice.
-
-It executes the SQL roles/grants and schema scripts, sets both separate passwords, and verifies application read-only rights. **Do not send or commit passwords.**
-
-**SQL-only alternative:** In pgAdmin Query Tool, connected to the existing `"COT"` database as `postgres`, execute `sql/setup_existing_cot.sql`. It creates roles, all schema objects and grants but **does not set passwords**. To set passwords without putting them in SQL, use the Python setup tool.
-
-Either way, no other database (`Trd`, etc.) is modified, and no existing `"COT"` database is dropped.
-
-## 4. After setup, import archived files into PostgreSQL
-
-Set secure connection access for `cot_loader` (e.g. Windows libpq `%APPDATA%\postgresql\pgpass.conf`) and a password-free-in-source DSN:
-
-```powershell
-$env:COT_DATABASE_URL = "postgresql://cot_loader@localhost:5432/COT"
-.\scripts\load_history.bat --start-year 2025 --end-year 2025 --offline
-.\scripts\verify.bat
-```
-
-The `--offline` option reads only validated source archives. The database ingester tracks the matching raw manifest for each window and does not contact CFTC to re-download that period.
-
-For apps, use `cot_app` rather than the loader/admin credentials:
-`postgresql://cot_app@localhost:5432/COT` (host/port adjusted if necessary).
-
-## Testing and caveats
-
-- The GitHub code is prepared, but **the scripts have not yet been run against your Windows PostgreSQL and OneDrive environment**.
-- Do not confuse CFTC **Tuesday position date** with Friday release date when using COT in backtests.
-- No original annual CFTC compressed ZIP files are downloaded. Here, “original files” means unaltered response bytes from the official CFTC Socrata API.
-- The raw data and PostgreSQL must be reconciled before scheduling the full weekly end-to-end pipeline.
+- No code has been executed against your Windows/OneDrive installation here.
+- The PostgreSQL schema must be updated to include the source_file column;
+  setup_cot.bat or sql/01_schema.sql applies this change.
+- Existing API raw-response archives and the new date-oriented JSON are not
+  byte-identical; the new files retain the source records without changing
+  fields or values. Original response bytes are kept in the legacy archive.
+- Always distinguish the CFTC Tuesday position date from the date the report
+  became publicly available when testing trading strategies.
