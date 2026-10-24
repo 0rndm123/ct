@@ -1,3 +1,4 @@
+-- COT_SCHEMA_VERSION: 20261024_2
 -- Execute inside the dedicated "COT" database.
 BEGIN;
 -- Older PostgreSQL installations may still allow PUBLIC to CREATE in public.
