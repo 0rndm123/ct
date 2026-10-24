@@ -16,6 +16,7 @@ import sys
 
 import psycopg
 from psycopg import sql
+from check_schema import validate_sql_files
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +51,7 @@ def bootstrap(
         raise ValueError("Use passwords of at least 14 characters")
     if not ROLE_SQL.is_file() or not SCHEMA_SQL.is_file():
         raise FileNotFoundError("SQL setup files are missing from the repository")
+    validate_sql_files()
 
     # This script NEVER creates or drops a database. COT must exist already.
     with psycopg.connect(
@@ -126,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--admin-user", default=os.getenv("COT_ADMIN_USER", "postgres"))
     args = parser.parse_args(argv)
     try:
+        validate_sql_files()
         print("Target PostgreSQL:", f"{args.host}:{args.port}/COT")
         print("Administrative role:", args.admin_user)
         admin_secret = getpass(f"Password for PostgreSQL administrator {args.admin_user}: ")
