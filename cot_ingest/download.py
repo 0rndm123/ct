@@ -13,10 +13,13 @@ from __future__ import annotations
 
 import argparse
 from datetime import date, datetime, timedelta, timezone
+import json
 import logging
 import sys
 
-from cot_ingest.archive import archive_root, ensure_archive
+from cot_ingest.archive import (
+    SourceArchive, archive_root, ensure_archive, validate_archive,
+)
 from cot_ingest.sources import (
     DATASETS, ORDER, api_session, check_dataset_selection, source_count, where_clause,
 )
@@ -77,6 +80,27 @@ def download(
     return finished, total_rows
 
 
+
+def verify_local_archives(datasets: list[str]) -> tuple[int, int]:
+    """Verify all saved JSON files without any API or database connection."""
+    root = archive_root()
+    count, total_rows = 0, 0
+    for path in sorted(root.glob("*/*/*/*/manifest.json")):
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        if manifest.get("dataset_id") not in datasets:
+            continue
+        archive = SourceArchive(path.parent, manifest)
+        validate_archive(archive)
+        count += 1
+        total_rows += archive.row_count
+        print(f"OK {manifest['dataset_id']} {manifest['mode']} "
+              f"{manifest['from_date']} to {manifest['to_date_exclusive']} "
+              f"{archive.row_count} rows | {path}")
+    if count == 0:
+        print(f"No original CFTC snapshots found under {root}")
+    return count, total_rows
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Download and validate original CFTC COT JSON to OneDrive. No DB access."
@@ -92,9 +116,15 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--refresh", action="store_true", help="Archive a new complete historical snapshot")
         else:
             p.add_argument("--lookback-days", type=int, default=56)
+    checker = sub.add_parser("verify", help="Verify saved original JSON files without API/DB")
+    checker.add_argument("--datasets", default="all")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
+        if args.command == "verify":
+            count, rows = verify_local_archives(check_dataset_selection(args.datasets))
+            print(f"Validated {count} original-file snapshots and {rows} rows.")
+            return 0 if count else 1
         count, rows = download(
             args.command,
             check_dataset_selection(args.datasets),
