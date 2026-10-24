@@ -117,11 +117,11 @@ CREATE OR REPLACE VIEW cot.v_numeric_metrics AS
 SELECT d.report_code,d.family,d.universe,
        r.report_date,r.cftc_contract_market_code,r.market_and_exchange_names,
        kv.key AS metric_name,
-       CASE WHEN kv.value ~ '^[+-]?[0-9]+(\\.[0-9]+)?$'
+       CASE WHEN kv.value ~ '^[+-]?[0-9]+([.][0-9]+)?$'
             THEN kv.value::numeric ELSE NULL END AS metric_value
 FROM cot.reports r
 JOIN cot.datasets d USING (dataset_id)
 CROSS JOIN LATERAL jsonb_each_text(r.payload) AS kv(key,value)
-WHERE kv.value ~ '^[+-]?[0-9]+(\\.[0-9]+)?$';
+WHERE kv.value ~ '^[+-]?[0-9]+([.][0-9]+)?$';
 
 COMMIT;
