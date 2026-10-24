@@ -38,6 +38,10 @@ echo.
 "%PYEXE%" --version
 if errorlevel 1 goto :no_python
 
+echo Checking local SQL revision before downloading files or asking for passwords...
+"%PYEXE%" scripts\check_schema.py
+if errorlevel 1 goto :failed
+
 echo [1/4] Checking required Python packages...
 "%PYEXE%" -m pip install -r "requirements.txt"
 if errorlevel 1 goto :failed
