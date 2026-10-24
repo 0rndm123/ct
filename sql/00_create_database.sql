@@ -14,5 +14,5 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'COT')
 
 -- Remove default PUBLIC database access and explicitly grant approved roles.
 REVOKE ALL ON DATABASE "COT" FROM PUBLIC;
-GRANT CONNECT, TEMPORARY ON DATABASE "COT" TO cot_loader;
+GRANT CONNECT, TEMPORARY, CREATE ON DATABASE "COT" TO cot_loader;
 GRANT CONNECT ON DATABASE "COT" TO cot_app;
