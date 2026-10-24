@@ -1,3 +1,5 @@
+> **Current directory layout (2026-10-24):** Use [date-based COT storage](date_based_storage.md) for extraction, migration, validation and loading. This older document describes the retired dataset-ID archive layout preserved only for backwards compatibility. The Git repository location is unchanged.
+
 # Windows installation and raw data lifecycle
 
 This repository has **two different OneDrive destinations**. Do not move the Git repository to the finance data directory.
