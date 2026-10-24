@@ -14,6 +14,8 @@ from typing import Any, Iterator
 import psycopg
 import requests
 from psycopg.types.json import Jsonb
+
+from cot_ingest.archive import ensure_archive, iter_archive_pages
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -187,20 +189,27 @@ def connect_db() -> psycopg.Connection:
 def ingest_window(
     conn: psycopg.Connection, session: requests.Session,
     run_id: int, dataset_id: str, start: date, stop: date, page_size: int,
+    mode: str, offline: bool = False, refresh_archive: bool = False,
 ) -> None:
-    # All business keys are held for one window, so duplicate rows fail instead of silently merging.
-    expected = source_count(session, dataset_id, start, stop)
+    # Complete and checksum-verify all original CFTC JSON files BEFORE writing any report rows.
+    archive = ensure_archive(
+        session, dataset_id, start, stop, mode, page_size,
+        get_count=source_count, make_where=where_clause, order=ORDER,
+        offline=offline, refresh_history=refresh_archive,
+    )
+    expected = archive.row_count
+    LOG.info("Validated original CFTC archive: %s", archive.manifest_path)
     LOG.info("%s %s to %s: %s source rows", DATASETS[dataset_id][0], start, stop, expected)
     with conn.transaction():
         conn.execute(
-            """INSERT INTO cot.ingest_windows(run_id,dataset_id,from_date,to_date,expected_rows)
-               VALUES (%s,%s,%s,%s,%s)""",
-            (run_id, dataset_id, start, stop, expected),
+            """INSERT INTO cot.ingest_windows(run_id,dataset_id,from_date,to_date,expected_rows,archive_manifest)
+               VALUES (%s,%s,%s,%s,%s,%s)""",
+            (run_id, dataset_id, start, stop, expected, str(archive.manifest_path)),
         )
     fetched = 0
     seen: set[tuple[date, str, str]] = set()
     try:
-        for page in iter_source_pages(session, dataset_id, start, stop, expected, page_size):
+        for page in iter_archive_pages(archive):
             args = []
             for row in page:
                 key = key_for(row)
@@ -252,7 +261,8 @@ def ingest_window(
         raise
 
 def run_ingestion(mode: str, datasets: list[str], start_year: int | None, end_year: int | None,
-                  lookback_days: int, page_size: int) -> None:
+                  lookback_days: int, page_size: int,
+                  offline: bool = False, refresh_archive: bool = False) -> None:
     today = datetime.now(timezone.utc).date()
     if page_size < 1 or page_size > 10000:
         raise ValueError("page-size must be between 1 and 10000")
@@ -283,7 +293,8 @@ def run_ingestion(mode: str, datasets: list[str], start_year: int | None, end_ye
                             raise ValueError("lookback-days must be >= 7")
                         windows = [(today - timedelta(days=lookback_days), today + timedelta(days=1))]
                     for start, stop in windows:
-                        ingest_window(conn, session, run_id, ds, start, stop, page_size)
+                        ingest_window(conn, session, run_id, ds, start, stop, page_size,
+                                      mode, offline=offline, refresh_archive=refresh_archive)
                 conn.execute(
                     "UPDATE cot.ingest_runs SET status='completed',finished_at=now() WHERE run_id=%s",
                     (run_id,),
@@ -327,6 +338,10 @@ def main(argv: list[str] | None = None) -> int:
         p = sub.add_parser(mode)
         p.add_argument("--datasets", default="all", help="comma-separated codes/IDs, or all")
         p.add_argument("--page-size", type=int, default=3000)
+        p.add_argument("--offline", action="store_true",
+                       help="Read already archived original JSON instead of downloading")
+        p.add_argument("--refresh-archive", action="store_true",
+                       help="Download a new immutable snapshot even for historical years")
         if mode == "history":
             p.add_argument("--start-year", type=int)
             p.add_argument("--end-year", type=int)
@@ -346,7 +361,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             run_ingestion(args.command,check_dataset_selection(args.datasets),
                           getattr(args,"start_year",None),getattr(args,"end_year",None),
-                          getattr(args,"lookback_days",56),args.page_size)
+                          getattr(args,"lookback_days",56),args.page_size,
+                          offline=args.offline,refresh_archive=args.refresh_archive)
         return 0
     except (requests.RequestException, psycopg.Error, ValueError, RuntimeError) as exc:
         LOG.error("COT ingestion failed: %s",exc)
