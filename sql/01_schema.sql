@@ -1,5 +1,7 @@
 -- Execute inside the dedicated "COT" database.
 BEGIN;
+-- Older PostgreSQL installations may still allow PUBLIC to CREATE in public.
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 -- All schema objects must be owned by cot_loader, NOT by the admin account.
 SET LOCAL ROLE cot_loader;
 CREATE SCHEMA IF NOT EXISTS cot AUTHORIZATION cot_loader;
