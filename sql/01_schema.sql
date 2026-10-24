@@ -84,6 +84,88 @@ CREATE INDEX IF NOT EXISTS idx_cot_reports_market_date ON cot.reports (cftc_cont
 CREATE INDEX IF NOT EXISTS idx_cot_reports_dataset_date ON cot.reports (dataset_id,report_date DESC);
 CREATE INDEX IF NOT EXISTS idx_cot_reports_commodity ON cot.reports (commodity_name);
 
+-- Current successfully loaded source file per report family and CFTC position date.
+-- Hash enables incremental runs without touching identical rows.
+CREATE TABLE IF NOT EXISTS cot.source_files (
+    dataset_id text NOT NULL REFERENCES cot.datasets(dataset_id),
+    report_date date NOT NULL,
+    source_file text NOT NULL,
+    file_sha256 char(64) NOT NULL CHECK (file_sha256 ~ '^[0-9a-f]{64}
+    revision_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    dataset_id text NOT NULL,
+    report_date date NOT NULL,
+    cftc_contract_market_code text NOT NULL,
+    market_and_exchange_names text NOT NULL,
+    previous_payload jsonb NOT NULL,
+    previous_payload_sha256 char(64) NOT NULL,
+    replaced_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE OR REPLACE FUNCTION cot.audit_report_revision() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.payload_sha256 IS DISTINCT FROM NEW.payload_sha256 THEN
+        INSERT INTO cot.report_revisions (
+            dataset_id,report_date,cftc_contract_market_code,market_and_exchange_names,
+            previous_payload,previous_payload_sha256
+        ) VALUES (
+            OLD.dataset_id,OLD.report_date,OLD.cftc_contract_market_code,OLD.market_and_exchange_names,
+            OLD.payload,OLD.payload_sha256
+        );
+        NEW.last_changed_at := now();
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_cot_report_revision ON cot.reports;
+CREATE TRIGGER trg_cot_report_revision BEFORE UPDATE ON cot.reports
+FOR EACH ROW EXECUTE FUNCTION cot.audit_report_revision();
+
+CREATE OR REPLACE VIEW cot.v_latest_reports AS
+SELECT DISTINCT ON (r.dataset_id,r.cftc_contract_market_code)
+    d.report_code,d.family,d.universe,r.*
+FROM cot.reports r JOIN cot.datasets d USING (dataset_id)
+ORDER BY r.dataset_id,r.cftc_contract_market_code,r.report_date DESC,r.market_and_exchange_names;
+
+-- Query arbitrary numeric source fields without assuming common family-specific names.
+CREATE OR REPLACE VIEW cot.v_numeric_metrics AS
+SELECT d.report_code,d.family,d.universe,
+       r.report_date,r.cftc_contract_market_code,r.market_and_exchange_names,
+       kv.key AS metric_name,
+       CASE WHEN kv.value ~ '^[+-]?[0-9]+([.][0-9]+)?$'
+            THEN kv.value::numeric ELSE NULL END AS metric_value
+FROM cot.reports r
+JOIN cot.datasets d USING (dataset_id)
+CROSS JOIN LATERAL jsonb_each_text(r.payload) AS kv(key,value)
+WHERE kv.value ~ '^[+-]?[0-9]+([.][0-9]+)?$';
+
+-- Coverage of all seven datasets by reporting date.
+CREATE OR REPLACE VIEW cot.v_report_coverage AS
+SELECT r.report_date, d.report_code, count(*)::bigint AS contract_rows,
+       max(s.file_sha256) AS source_sha256,
+       max(s.last_loaded_at) AS last_loaded_at
+FROM cot.reports r
+JOIN cot.datasets d USING (dataset_id)
+LEFT JOIN cot.source_files s
+       ON s.dataset_id = r.dataset_id AND s.report_date = r.report_date
+GROUP BY r.report_date, d.report_code;
+
+-- Applications have read-only access; ingestion exclusively uses cot_loader.
+GRANT USAGE ON SCHEMA cot TO cot_app;
+GRANT SELECT ON ALL TABLES IN SCHEMA cot TO cot_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA cot GRANT SELECT ON TABLES TO cot_app;
+
+COMMIT;
+),
+    row_count integer NOT NULL CHECK (row_count > 0),
+    first_loaded_at timestamptz NOT NULL DEFAULT now(),
+    last_loaded_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dataset_id, report_date)
+);
+CREATE INDEX IF NOT EXISTS idx_source_files_date
+    ON cot.source_files(report_date DESC);
+
 CREATE TABLE IF NOT EXISTS cot.report_revisions (
     revision_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     dataset_id text NOT NULL,
