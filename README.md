@@ -1,5 +1,7 @@
 # CT — CFTC Commitments of Traders
 
+**For the current PostgreSQL setup and loading process, follow [the COT import guide](docs/postgres_load.md).** The existing database is retained, source files remain in weekly date folders, and the recommended first-load command is `scripts\\setup_and_load.bat`.
+
 Independent Python/PostgreSQL ingestion project. Target PostgreSQL database: **COT** (separate from SysTrd/TRD).
 
 ## Official source
