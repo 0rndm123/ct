@@ -22,6 +22,20 @@ The primary data source is **the official CFTC Socrata API**, not a paid or thir
 
 CFTC documentation states that **no provided ID column is a guaranteed primary key**. The local key combines report dataset, position date, CFTC contract market code, and market/exchange name; any duplicate source keys within the same extraction window are rejected rather than silently discarded.
 
+## Start here (existing database + original downloads)
+
+**[Quick start: one SQL setup, one Python setup, and independent CFTC downloads](docs/quickstart.md)**
+
+The PostgreSQL `"COT"` database has already been created manually. Run `scripts/setup_cot.bat` for accounts/passwords/schema, or `sql/setup_existing_cot.sql` from pgAdmin for the SQL-only provisioning step. For the original files **you do not need to wait for database configuration**:
+
+```powershell
+python -m pip install "requests>=2.32,<3"
+.\scripts\download_history.bat --start-year 2025 --end-year 2025
+python -m cot_ingest.download verify
+```
+
+The default raw archive is `D:\OD\OneDrive\Fin\data\COT`, separate from the unchanged source-code repository.
+
 ## Locations and installation
 
 | Purpose | Location |
