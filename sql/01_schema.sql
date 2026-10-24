@@ -50,12 +50,14 @@ CREATE TABLE IF NOT EXISTS cot.ingest_windows (
     status text NOT NULL DEFAULT 'running' CHECK (status IN ('running','completed','failed')),
     error_message text,
     archive_manifest text,
+    source_file text,
     PRIMARY KEY (run_id,dataset_id,from_date,to_date),
     CHECK(to_date > from_date)
 );
 
 -- Compatible with schema installations created before raw-file preservation.
 ALTER TABLE cot.ingest_windows ADD COLUMN IF NOT EXISTS archive_manifest text;
+ALTER TABLE cot.ingest_windows ADD COLUMN IF NOT EXISTS source_file text;
 
 CREATE TABLE IF NOT EXISTS cot.reports (
     dataset_id text NOT NULL REFERENCES cot.datasets(dataset_id),
