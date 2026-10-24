@@ -33,10 +33,11 @@ CFTC documentation states that **no provided ID column is a guaranteed primary k
    ```
 
 3. Create the dedicated database using `psql -d postgres -f sql/00_create_database.sql` (the account needs `CREATEDB`).
-4. Set `COT_DATABASE_URL` to your own local PostgreSQL DSN, e.g. `postgresql://cot_user:YOUR_PASSWORD@localhost:5432/COT`. Never commit credentials.
+4. Set `COT_DATABASE_URL` to a PostgreSQL DSN for the **same database role used to create the schema** (or grant explicit privileges). Example: `postgresql://postgres@localhost:5432/COT`. Prefer a local PostgreSQL password file (`%APPDATA%\\postgresql\\pgpass.conf`) over putting credentials in BAT files. For Task Scheduler, set the connection environment for that Windows account persistently. Never commit credentials.
 5. Apply `psql -d COT -f sql/01_schema.sql` (or run `scripts\init_db.bat` after configuring `PGUSER`/`PGHOST`).
-6. Run the initial history load: `scripts\load_history.bat`. This may require many API requests; it is resumable through idempotent upserts and logged ingestion windows.
-7. Run each week: `scripts\update_weekly.bat`, optionally scheduled with Windows Task Scheduler for **Saturday morning** after the usual Friday release.
+6. Run tests with `.\\.venv\\Scripts\\python.exe -m unittest discover -s tests -v`, then pilot one year with `scripts\\load_history.bat --start-year 2025 --end-year 2025`.
+7. Run the initial full history load: `scripts\load_history.bat`. This may require many API requests; it is resumable through idempotent upserts and logged ingestion windows.
+8. Run each week: `scripts\update_weekly.bat`, optionally scheduled with Windows Task Scheduler for **Saturday morning** after the usual Friday release.
 
 You can instead invoke the CLI:
 
