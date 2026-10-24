@@ -17,7 +17,7 @@ import logging
 import sys
 
 from cot_ingest.archive import archive_root, ensure_archive
-from cot_ingest.cli import (
+from cot_ingest.sources import (
     DATASETS, ORDER, api_session, check_dataset_selection, source_count, where_clause,
 )
 
