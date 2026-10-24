@@ -1,3 +1,4 @@
+-- COT_SCHEMA_VERSION: 20261024_2
 -- One-file setup for an EXISTING COT database; run as PostgreSQL admin.
 -- Does not create/drop COT. Does not contain any passwords.
 
