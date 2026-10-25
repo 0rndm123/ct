@@ -2,6 +2,24 @@
 
 **For the current PostgreSQL setup and loading process, follow [the COT import guide](docs/postgres_load.md).** The existing database is retained, source files remain in weekly date folders, and the recommended first-load command is `scripts\\setup_and_load.bat`.
 
+## Weekly COT update (Windows Task Scheduler)
+
+Official reports normally publish **Friday 15:30 US Eastern**, with the preceding Tuesday's positions.
+To schedule the requested **Tuesday 09:00 Portugal-local** update, first finish the initial database setup;
+then run from PowerShell:
+
+```powershell
+.\SETUP_COT_WEEKLY.bat  # one-time password protection and task registration
+.\RUN_COT_WEEKLY.bat    # test the weekly pipeline immediately
+```
+
+Windows DPAPI protects the cot_loader password in the current user's profile.
+The job reads the most recent 84 days of CFTC source reports, updates date-based JSON,
+and imports only changed or missing local records into PostgreSQL COT.
+Logs live under `%LOCALAPPDATA%\CT_COT\logs`. The scheduled user must be logged in.
+
+**[Full weekly automation instructions](docs/weekly_automation.md)**
+
 ## One command from PowerShell
 
 From the cloned CT repository, run `git pull origin main` and then:
