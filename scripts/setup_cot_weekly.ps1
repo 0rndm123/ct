@@ -34,7 +34,7 @@ $credential = New-Object System.Management.Automation.PSCredential('cot_loader',
 $env:PGPASSWORD = $credential.GetNetworkCredential().Password
 $env:COT_DATABASE_URL = 'postgresql://cot_loader@localhost:5432/COT'
 try {
-    & $python -c 'import psycopg; c=psycopg.connect("postgresql://cot_loader@localhost:5432/COT",connect_timeout=15); assert c.execute("SELECT current_database()").fetchone()[0]=="COT"; c.execute("SELECT count(*) FROM cot.datasets"); c.execute("SELECT count(*) FROM cot.source_files"); c.close(); print("PostgreSQL COT login and schema OK")'
+    & $python -m cot_ingest.db_check
     if ($LASTEXITCODE -ne 0) {
         throw 'cot_loader login or COT schema validation failed. Run INSTALL_COT.bat --existing first.'
     }
