@@ -85,7 +85,7 @@ try {
     }
 }
 catch {
-    Write-Error ('COT weekly update FAILED: ' + $_.Exception.Message)
+    Write-Host ('ERROR: COT weekly update FAILED: ' + $_.Exception.Message) -ForegroundColor Red
     exit 1
 }
 finally {
